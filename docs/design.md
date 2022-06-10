@@ -25,9 +25,16 @@ Write a CLI tool to interact with the service above
 Initial design of the JobService api is represented in the interface below
 
 ```go
+type Job struct {
+	ID int32
+	Cmd *exec.Cmd
+	Status string
+}
+
+
 type JobService interface {
-		Start(authID string, cmd []string, limits ResourceLimit) (*Command, error)
-		Get(authID string, jobID int32) (*Command, error)
+		Start(authID string, cmd []string, limits ResourceLimit) (*Job, error)
+		Get(authID string, jobID int32) (*Job, error)
 		Stop(authID string, jobID int32) error
 		Stream(authID string, jobID int32, writer io.Writer) error
 }
@@ -44,12 +51,21 @@ perform actions on processes that were created by user with a different `authID`
 
 ResourceLimit is a data structure than contains the CPU, Memory, and Disk IO resource limit.  
 
-`Command` is some data type that contains data/state for a Command.  
+`Job` is some data type that contains data/state for a job.  
 
 State Transitions:
 
 `running` can be transitioned to `stop` and `finished`.  
 `stopped` and `finished` are terminal states, they cannot change after.
+
+We will store the commands in an in-memory map data structure like below
+
+```go
+type Store struct {
+	data map[authID]map[jobID]*Job
+}
+
+```
 
 ### GRPC API
 
@@ -71,18 +87,38 @@ commands.
 
 #### Starting a process
 
+The steps to start a process and it's Cgroup are:
+
+1. Request is received via GRPC server
+2. authID is parsed from the Subject attribute in x509 cert.
+3. Get new job ID
+4. Create a new Cgroup hiearchy using the job ID.
+5. Start the process
+6. Add the process's PID to the `cgroup.procs` file.
+7. Use cmd.Wait() in a separate Goroutine to ensure long running processes don't block the grpc request.
+
 The `*Cmd.Start()` method will be used to start a process.
 
 #### Stopping a process
 
-We will stop a process if it has already been started by using `*os.Process.Kill()` located on the `Cmd` struct.
+The steps to stop a process and it's Cgroups are:
+
+1. Request is received via GRPC server
+2. authID is parsed from the Subject attribute in x509 cert.
+3. Check if the jobID exists -> exit with NotFound if not found
+4. Run os.Process.Kill() to kill the process
+
+#### Cgroup teardown
+
+The following steps will be used to clean up unneeded Cgroup resources after a process is stopped or finished running. 
+1. After cmd.Wait has returned (See 'Starting a process #7'), use `rmdir` to remove the Cgroup hiearchy created for the process.
 
 ### Streaming output
 
 There are 3 functional behaviors for streaming the output
 1. clients get a continuous stream of data
-1. clients that connect start streaming from the beginning
-1. multiple concurrent client can connect to the stream
+2. clients that connect start streaming from the beginning
+3. multiple concurrent client can connect to the stream
 
 For clients to get a continuous stream of data, we will use grpc's server streaming rpc.
 
@@ -197,6 +233,9 @@ collision attack (no SHA1).
 
 A strong cipher suite for TLS 1.2 that addresses the above concerns is `ECDHE-ECDSA-AES256-GCM-SHA384`.
 
+For this exercise, because the client will just be the CLI, we will not need to provide support for a wider range of
+clients, thus we will choose TLS 1.3.
+
 ### Security Considerations / Limitations
 
 We need to consider safeguards against the types of commands/processes that can be created through this API. This api
@@ -209,6 +248,11 @@ exfiltrate data as well.
 There is currently no rate limiting on the service - ie there are no application level bounds on the number of
 concurrent clients that can be streaming an output. At some point, it will reach a system level upper limit (likely
 running out of fds).
+
+In this exercise, I use int32 as the jobID and do a naive auto increment and auth.ID is just string of the Identity in
+the cert. Using int is prone to possible attacks by attempting to query a job id that is +n/-n.
+Those could be of type UUID reduce the risk, but for this exercise, I think auto increment is simple enough, but would
+like to call it our here.
 
 ### Performance Considerations
 
@@ -246,7 +290,7 @@ To run the command `ls -al`
 
 ```
 $ client start ls -al
-> job id: 1
+> { "id": 1, "status": "running" }
 ```
 
 
@@ -254,12 +298,15 @@ To stop a job with job id 1
 
 ```
 $ client stop --id=1
+> error message (if error)
 ```
 
 To get a job with job id 1
 
 ```
 $ client get --id=1
+> { "id": 1, "status": "string" }
+
 ```
 
 To stream a job with job id 1
@@ -269,6 +316,8 @@ $ client stream --id=1
 > ..
 > ..
 ```
+
+The actual CLI output format may not be JSON, but the data presented returned be the same.
 
 ## Open Questions
 * The ability to stream the data starting from the beginning of the process creation means that the process's output
