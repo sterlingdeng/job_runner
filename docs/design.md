@@ -135,17 +135,30 @@ readers are not at the tail.
 
 ### Resource Limits
 
-TODO: why v1 over v2?
+There are 2 versions of Cgroups, v1 and v2.
 
-We will use linux's v1 Cgroups to perform some simple CPU, Memory, and Disk IO resource control on processes. Each limit will be
-based per process, thus, current design will create a directory whose name is the job id underneath the different
-resource controllers. Below is an example:
+One of the major differences is the hierarchy structure when mounting cgroups to `/sys/fs/cgroups`
 
+To put it briefly, in v1, individual resource controllers are the top level concept, and groups are added underneath it.
+If you needed a `cpu` and `mem` controller for a group `baz`, the structure would be
 ```
-/sys/fs/cgroup/{cpu,memory,blkio}/:job_id
+/sys/fs/cgroup/cpu/baz
+/sys/fs/cgroup/mem/baz
 ```
 
-The PID of the process will then be appended to the `tasks` file.
+In v2, the group is the top level concept and all available resource controllers are available based on the group.
+The fs would be:
+```
+/sys/fs/cgroup/baz/{cpu.max, mem.max}
+```
+where `cpu.weight` and `mem.max` are files that control the cpu and mem resource. These limits are applied to all processes 
+added to the group.
+
+We will choose V2 for the simplicity in the file system.
+
+We will limit CPU using `cpu.weight`, max memory allowed by `mem.max`, and IO limits by `io.max`.
+
+What I'm not sure about is how to choose the correct $MAJ:$MIN device numbers.
 
 ### Authorization
 
