@@ -34,18 +34,22 @@ type JobService interface {
 
 // different command statuses
 var (
-	StatusRunning 	= "running"
-	StatusStopped 	= "stopped"
-	StatusFinished 	= "finished"
+	StatusRunning 	= "running" 	// process is currently running
+	StatusStopped 	= "stopped" 	// process was stopped via the Stop command
+	StatusFinished 	= "finished" 	// process exit normally
 )
 ```
-
 `authID` is a unique string used for basic authorization purposes - a user with an `authID` `foo` must not be able to
 perform actions on processes that were created by user with a different `authID`. See the authorization section for more details.  
 
 ResourceLimit is a data structure than contains the CPU, Memory, and Disk IO resource limit.  
 
 `Command` is some data type that contains data/state for a Command.  
+
+State Transitions:
+
+`running` can be transitioned to `stop` and `finished`.  
+`stopped` and `finished` are terminal states, they cannot change after.
 
 ### GRPC API
 
@@ -131,7 +135,11 @@ Single Writer, multiple readers.
 Readers take a `RLock`, writers take a `Lock`.
 
 A potential problem with this approach is if the writer is blocked, it will block readers from advancing, even if
-readers are not at the tail.
+readers are not at the tail because the writer will take a Lock on the entire struct.
+
+Another possible implementation that may avoid this issue is avoiding locks altogether and leveraging the fact that the
+len of the buffer is always increasing. The length of the buffer can be written to a field that's atomically read by
+readers and written by the single writer.
 
 ### Resource Limits
 
