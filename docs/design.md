@@ -170,9 +170,6 @@ func (b *Buf) GetReader() io.Reader {
 Single Writer, multiple readers.
 Readers take a `RLock`, writers take a `Lock`.
 
-A potential problem with this approach is if the writer is blocked, it will block readers from advancing, even if
-readers are not at the tail because the writer will take a Lock on the entire struct.
-
 Another possible implementation that may avoid this issue is avoiding locks altogether and leveraging the fact that the
 len of the buffer is always increasing. The length of the buffer can be written to a field that's atomically read by
 readers and written by the single writer.
