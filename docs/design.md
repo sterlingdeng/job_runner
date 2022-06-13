@@ -148,12 +148,13 @@ commands.
 The steps to start a process and it's Cgroup are:
 
 1. Request is received via GRPC server
-2. authID is parsed from the Subject attribute in x509 cert.
-3. Get new job ID
-4. Create a new Cgroup hiearchy using the job ID.
-5. Start the process
-6. Add the process's PID to the `cgroup.procs` file.
-7. Use cmd.Wait() in a separate Goroutine to ensure long running processes don't block the grpc request.
+2. userID is parsed from the Subject attribute in x509 cert.
+3. Check if the User has admin role
+4. Get new job ID
+5. Create a new Cgroup hiearchy using the job ID.
+6. Start the process
+7. Add the process's PID to the `cgroup.procs` file.
+8. Use cmd.Wait() in a separate Goroutine to ensure long running processes don't block the grpc request.
 
 The `*Cmd.Start()` method will be used to start a process.
 
@@ -162,10 +163,11 @@ The `*Cmd.Start()` method will be used to start a process.
 The steps to stop a process and it's Cgroups are:
 
 1. Request is received via GRPC server
-2. authID is parsed from the Subject attribute in x509 cert.
-3. Check if the jobID exists -> exit and returns grpc error code NotFound if jobID is not found
-4. Run os.Process.Kill() to kill the process
-5. Return exit code and message after process is killed. An error otherwise.
+2. userID is parsed from the Subject attribute in x509 cert.
+3. Check if the User has admin role
+4. Check if the jobID exists -> exit and returns grpc error code NotFound if jobID is not found
+5. Run os.Process.Kill() to kill the process
+6. Return exit code and message after process is killed. An error otherwise.
 
 #### Cgroup teardown
 
@@ -175,11 +177,11 @@ The following steps will be used to clean up unneeded Cgroup resources after a p
 ### Streaming output
 
 There are 3 functional behaviors for streaming the output
+For clients to get a continuous stream of data, we will use grpc's server streaming rpc.
+
 1. clients get a continuous stream of data
 2. clients that connect start streaming from the beginning
 3. multiple concurrent client can connect to the stream
-
-For clients to get a continuous stream of data, we will use grpc's server streaming rpc.
 
 A stream can be gracefully stopped by 2 events:
 1. The caller cancels the stream. This can be controlled by context cancellation. A cancel can be propagated from the CLI.
@@ -289,7 +291,7 @@ type User struct {
 
 type Authorizer interface {
 	// Determines if `user` can perform `action`. Returns access as a boolean and an error
-	HasAccess(user string, action string) (bool, error)
+	HasAccess(userID string, action string) (bool, error)
 }
 ```
 
