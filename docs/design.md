@@ -11,7 +11,7 @@ Implement a grpc service that provides the following features:
 * Start a process
 	* Provide resource control (CPU, Mem, Disk IO) via Cgroups
 * Stop a running process
-* Get the status of a running process
+* Get the status of a process
 * Stream the output of a running process
 	* Concurrent clients should be supported
 	* Clients that connect stream from the beginning of the output. (potential issue - see below)
@@ -20,9 +20,61 @@ Write a CLI tool to interact with the service above
 
 ## Details
 
-### Job Service API
+### APIs
 
-Initial design of the JobService api is represented in the interface below
+#### client <-> service
+
+CLI client will interact with the service via GRPC
+
+Below is a proposal for the GRPC service and associated message structs
+
+```proto
+message Job {
+	int32 id = 1;
+	repeated string cmd = 2;
+	string status = 3;
+}
+
+message GetRequest {
+	int32 id = 1;
+}
+
+message StartRequest {
+	repeated string cmd = 1;
+	int32 num_cpu = 2;
+	int64 max_disk_io = 3;
+	int32 max_mem_use = 4;
+}
+
+message StopRequest {
+	int32 id = 1;
+}
+
+message StopResponse {
+	int32 code = 1;
+	string message = 2;
+}
+
+message StreamRequest {
+	int32 id = 1;
+}
+
+message StreamResponse {
+	bytes stream = 1;
+}
+
+service JobService {
+	rpc Get(GetRequest) returns (Job);
+	rpc Start(StartRequest) returns(Job);
+	rpc Stop(StopRequest) returns(StopResponse);
+	rpc Stream(StreamRequest) returns(stream StreamResponse);
+}
+```
+
+Error information will be transmitted using grpc codes and error message.
+
+#### service <-> lib
+Initial design of the job lib api is represented in the interface below
 
 ```go
 type Job struct {
@@ -31,13 +83,16 @@ type Job struct {
 	Status string
 }
 
-
 type JobService interface {
-		Start(authID string, cmd []string, limits ResourceLimit) (*Job, error)
-		Get(authID string, jobID int32) (*Job, error)
-		Stop(authID string, jobID int32) error
-		Stream(authID string, jobID int32, writer io.Writer) error
+		Start(cmd []string, limits ResourceLimit) (*Job, error)
+		Get(jobID int32) (*Job, error)
+		Stop(jobID int32) error
+		Stream(jobID int32, writer io.Writer) error
 }
+
+ResourceLimit is a data structure than contains the CPU, Memory, and Disk IO resource limit.  
+
+`Job` is some data type that contains data/state for a job.  
 
 // different command statuses
 var (
@@ -46,12 +101,6 @@ var (
 	StatusFinished 	= "finished" 	// process exit normally
 )
 ```
-`authID` is a unique string used for basic authorization purposes - a user with an `authID` `foo` must not be able to
-perform actions on processes that were created by user with a different `authID`. See the authorization section for more details.  
-
-ResourceLimit is a data structure than contains the CPU, Memory, and Disk IO resource limit.  
-
-`Job` is some data type that contains data/state for a job.  
 
 State Transitions:
 
@@ -62,21 +111,30 @@ We will store the commands in an in-memory map data structure like below
 
 ```go
 type Store struct {
-	data map[authID]map[jobID]*Job
+	data map[jobID]*Job
 }
 
 ```
 
-### GRPC API
+#### lib <-> linux kernel
 
-The server will be accessible by exposing a GRPC server that interacts with the job service lib.
+Cgroup requires interaction between the lib and the linux kernel. Below is a proposal for the API between lib and the OS
 
-```proto
-service JobService {
-	rpc Get(GetRequest) returns (Job);
-	rpc Start(StartRequest) returns(Job);
-	rpc Stop(StopRequest) returns(StopResponse);
-	rpc Stream(StreamRequest) returns(stream StreamResponse);
+```go
+type Limit struct {
+	CPU int
+	Mem int
+	IO int
+}
+
+// Constructor for Cgroup
+func NewCgroup(name string, limit Limit) Cgroup {
+	// return Cgroup
+}
+
+type Cgroup interface {
+	AddProcess(pid int) error
+	Close() error
 }
 ```
 
@@ -105,8 +163,9 @@ The steps to stop a process and it's Cgroups are:
 
 1. Request is received via GRPC server
 2. authID is parsed from the Subject attribute in x509 cert.
-3. Check if the jobID exists -> exit with NotFound if not found
+3. Check if the jobID exists -> exit and returns grpc error code NotFound if jobID is not found
 4. Run os.Process.Kill() to kill the process
+5. Return exit code and message after process is killed. An error otherwise.
 
 #### Cgroup teardown
 
@@ -121,6 +180,10 @@ There are 3 functional behaviors for streaming the output
 3. multiple concurrent client can connect to the stream
 
 For clients to get a continuous stream of data, we will use grpc's server streaming rpc.
+
+A stream can be gracefully stopped by 2 events:
+1. The caller cancels the stream. This can be controlled by context cancellation. A cancel can be propagated from the CLI.
+2. The command exits and there is nothing left to stream. An `io.EOF` can be returned to signal the close of the server stream, which can then propagate to the client.
 
 ```proto
 message StreamResponse { 
@@ -164,7 +227,6 @@ func (b *Buf) GetReader() io.Reader {
 		// use offset here
 	}
 }
-
 ```
 
 Single Writer, multiple readers.
@@ -203,12 +265,35 @@ What I'm not sure about is how to choose the correct $MAJ:$MIN device numbers.
 
 ### Authorization
 
-In this system, the authorization primitive will be the authID, a string that is used to uniquely identify different
-users. Because we will not be implementing a user system in this service, the identity of the user will be based off of
-the `Subject` field in the x509 certificate that is presented (because mTLS is required). Other considerations were
+The identity of the user will be based off of the `Subject` field in the x509 certificate that is presented (because mTLS is required). Other considerations were
 made, such as basing identity off of the certificate, but if attributes other than identity changes, then that would be
 considered a new user. The obvious downside of this is if the `Subject` field changes, that would be considered a new
 "user" in the system.
+
+We will use a simple RBAC scheme, with the following roles and their access.
+* viewer - can only run Get and Stream commands
+* admin - can use all the exposed API's
+
+Below are simple data models that can implement the basic RBAC scheme.
+
+```go
+type Role struct {
+	Name string
+	Actions []string // a list of allowable actions. in this exercise, they will be the methods as strings ("Get", "Stream", "Stop", "Start")
+}
+
+type User struct {
+	ID string
+	Roles []Role // a list of roles associated with the user
+}
+
+type Authorizer interface {
+	// Determines if `user` can perform `action`. Returns access as a boolean and an error
+	HasAccess(user string, action string) (bool, error)
+}
+```
+
+In our exercise, we will preload a two users, one with a `viewer` role and another with an `admin` role.
 
 ### Authentication
 
