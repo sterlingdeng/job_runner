@@ -234,7 +234,7 @@ Another possible implementation that may avoid this issue is avoiding locks alto
 len of the buffer is always increasing. The length of the buffer can be written to a field that's atomically read by
 readers and written by the single writer.
 
-### Resource Limits
+### Resource Limits via cgroups
 
 There are 2 versions of Cgroups, v1 and v2.
 
@@ -260,6 +260,14 @@ We will choose V2 for the simplicity in the file system.
 We will limit CPU using `cpu.weight`, max memory allowed by `mem.max`, and IO limits by `io.max`.
 
 What I'm not sure about is how to choose the correct $MAJ:$MIN device numbers.
+
+Special considerations:
+There is a brief window of time between the start of a process and adding the PID into the cgroup where
+the target process escapes resource limits set forth by the cgroup and more importantly, has the chance to
+create child processes that are not in the appropriate cgroup. In order to prevent this "escape" from occurring,
+we create a parent `sh` process and place that process into a cgroup first. Then, we will create the target process as a child 
+of the `sh` process. This ensures that when the target process is started, it will be executed already in the cgroup.
+	
 
 ### Authorization
 
