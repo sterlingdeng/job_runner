@@ -90,10 +90,6 @@ type JobService interface {
 		Stream(jobID int32, writer io.Writer) error
 }
 
-ResourceLimit is a data structure than contains the CPU, Memory, and Disk IO resource limit.  
-
-`Job` is some data type that contains data/state for a job.  
-
 // different command statuses
 var (
 	StatusRunning 	= "running" 	// process is currently running
@@ -107,7 +103,7 @@ State Transitions:
 `running` can be transitioned to `stop` and `finished`.  
 `stopped` and `finished` are terminal states, they cannot change after.
 
-We will store the commands in an in-memory map data structure like below
+We will store the jobs in an in-memory map data structure like below
 
 ```go
 type Store struct {
@@ -121,14 +117,14 @@ type Store struct {
 Cgroup requires interaction between the lib and the linux kernel. Below is a proposal for the API between lib and the OS
 
 ```go
-type Limit struct {
+type ResourceLimit struct {
 	CPU int
 	Mem int
 	IO int
 }
 
 // Constructor for Cgroup
-func NewCgroup(name string, limit Limit) Cgroup {
+func NewCgroup(name string, limit ResourceLimit) Cgroup {
 	// return Cgroup
 }
 
@@ -152,11 +148,10 @@ The steps to start a process and it's Cgroup are:
 3. Check if the User has admin role
 4. Get new job ID
 5. Create a new Cgroup hiearchy using the job ID.
-6. Start the process
-7. Add the process's PID to the `cgroup.procs` file.
-8. Use cmd.Wait() in a separate Goroutine to ensure long running processes don't block the grpc request.
-
-The `*Cmd.Start()` method will be used to start a process.
+6. Add the parent (main) process's PID to the `cgroup.procs` file.
+7. Create the process using `Cmd.Start()`
+8. Move the parent process's PID back to the root Cgroup
+9. Use `cmd.Wait()` in a separate goroutine to ensure long-running processes don't block the grpc request.
 
 #### Stopping a process
 
@@ -167,7 +162,8 @@ The steps to stop a process and it's Cgroups are:
 3. Check if the User has admin role
 4. Check if the jobID exists -> exit and returns grpc error code NotFound if jobID is not found
 5. Run os.Process.Kill() to kill the process
-6. Return exit code and message after process is killed. An error otherwise.
+6. Clean up Cgroup resources
+7. Return exit code and message after process is killed. An error otherwise.
 
 #### Cgroup teardown
 
