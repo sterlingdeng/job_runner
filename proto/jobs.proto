@@ -22,7 +22,10 @@ message StopRequest {
 	int32 id = 1;
 }
 
-message StopResponse {}
+message StopResponse {
+	int32 exit_code = 1;
+	string status = 2;
+}
 
 message StreamRequest {
 	int32 id = 1;
