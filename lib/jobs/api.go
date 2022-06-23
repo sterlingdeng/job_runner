@@ -3,13 +3,13 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"job_runner/pkg/authorizer"
-	"job_runner/pkg/cgroupz"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"job_runner/pkg/authn"
+	"job_runner/pkg/authorizer"
+	"job_runner/pkg/cgroupz"
 	"job_runner/proto"
 )
 
