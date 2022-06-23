@@ -10,6 +10,7 @@ import (
 	"job_runner/pkg/jobs"
 )
 
+// A simple model for a Job executed by the service.
 type JobRecord struct {
 	ID     int32
 	Job    jobs.Job
@@ -17,6 +18,7 @@ type JobRecord struct {
 	ctx    context.Context
 }
 
+// Service handles the basic API of dealing with multiple Jobs
 type Service struct {
 	ider
 	sync.Mutex
