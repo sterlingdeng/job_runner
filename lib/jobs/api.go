@@ -13,37 +13,34 @@ import (
 	"job_runner/proto"
 )
 
-var _ proto.JobServiceServer = (*Jobs)(nil)
+var _ proto.JobServiceServer = (*API)(nil)
 
-type Jobs struct {
+type API struct {
 	lib   *Service
 	authz *authorizer.Authorizer
-
-	ctx context.Context // used to control cancellation of actively running commands
 }
 
 // NewJobs returns a jobs api struct that implements the JobServiceServer grpc interface
-func NewJobs(ctx context.Context, lib *Service) *Jobs {
-	svc := Jobs{
+func NewJobs(lib *Service) *API {
+	svc := API{
 		lib: lib,
-		ctx: ctx,
 	}
 	return &svc
 }
 
-func (j *Jobs) Get(ctx context.Context, req *proto.GetRequest) (*proto.Job, error) {
+func (a *API) Get(ctx context.Context, req *proto.GetRequest) (*proto.Job, error) {
 	userID, err := authn.FromMD(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "missing id")
 	}
-	ok, err := j.authz.HasAccess(string(userID), authorizer.ActionGet)
+	ok, err := a.authz.HasAccess(string(userID), authorizer.ActionGet)
 	if err != nil {
 		return nil, status.Error(codes.Unknown, "")
 	}
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
-	cmd, err := j.lib.GetJob(ctx, req.GetId())
+	cmd, err := a.lib.GetJob(ctx, req.GetId())
 	if err != nil {
 		return nil, err
 	}
@@ -56,13 +53,13 @@ func (j *Jobs) Get(ctx context.Context, req *proto.GetRequest) (*proto.Job, erro
 	return &job, nil
 }
 
-func (j *Jobs) Start(ctx context.Context, req *proto.StartRequest) (*proto.Job, error) {
+func (a *API) Start(ctx context.Context, req *proto.StartRequest) (*proto.Job, error) {
 	fmt.Println("Starting..")
 	userID, err := authn.FromMD(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "missing id")
 	}
-	ok, err := j.authz.HasAccess(string(userID), authorizer.ActionStart)
+	ok, err := a.authz.HasAccess(string(userID), authorizer.ActionStart)
 	if err != nil {
 		return nil, status.Error(codes.Unknown, "")
 	}
@@ -72,7 +69,7 @@ func (j *Jobs) Start(ctx context.Context, req *proto.StartRequest) (*proto.Job, 
 
 	cmd := req.GetCmd()
 
-	job, err := j.lib.StartJob(ctx, cmd, cgroupz.ResourceLimit{
+	job, err := a.lib.StartJob(ctx, cmd, cgroupz.ResourceLimit{
 		CpuWeight: 100,
 		MaxMem:    1e8,
 		MaxIO:     nil,
@@ -88,14 +85,14 @@ func (j *Jobs) Start(ctx context.Context, req *proto.StartRequest) (*proto.Job, 
 	return &resp, nil
 }
 
-func (j *Jobs) Stop(ctx context.Context, req *proto.StopRequest) (*proto.StopResponse, error) {
+func (a *API) Stop(ctx context.Context, req *proto.StopRequest) (*proto.StopResponse, error) {
 	fmt.Println("Stopping..")
 
 	userID, err := authn.FromMD(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "missing id")
 	}
-	ok, err := j.authz.HasAccess(string(userID), authorizer.ActionStop)
+	ok, err := a.authz.HasAccess(string(userID), authorizer.ActionStop)
 	if err != nil {
 		return nil, status.Error(codes.Unknown, "")
 	}
@@ -103,7 +100,7 @@ func (j *Jobs) Stop(ctx context.Context, req *proto.StopRequest) (*proto.StopRes
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
 
-	exitCode, jobStatus, err := j.lib.StopJob(ctx, req.GetId())
+	exitCode, jobStatus, err := a.lib.StopJob(ctx, req.GetId())
 	if err != nil {
 		return nil, err
 	}
@@ -114,12 +111,12 @@ func (j *Jobs) Stop(ctx context.Context, req *proto.StopRequest) (*proto.StopRes
 }
 
 // Stream starts from the beginning of the log
-func (j *Jobs) Stream(req *proto.StreamRequest, server proto.JobService_StreamServer) error {
+func (a *API) Stream(req *proto.StreamRequest, server proto.JobService_StreamServer) error {
 	userID, err := authn.FromMD(server.Context())
 	if err != nil {
 		return status.Error(codes.Unauthenticated, "missing id")
 	}
-	ok, err := j.authz.HasAccess(string(userID), authorizer.ActionStream)
+	ok, err := a.authz.HasAccess(string(userID), authorizer.ActionStream)
 	if err != nil {
 		return status.Error(codes.Unknown, "")
 	}
@@ -128,7 +125,7 @@ func (j *Jobs) Stream(req *proto.StreamRequest, server proto.JobService_StreamSe
 	}
 
 	fmt.Println("Streaming..")
-	err = j.lib.StreamJob(server.Context(), req.GetId(), &streamWriter{server})
+	err = a.lib.StreamJob(server.Context(), req.GetId(), &streamWriter{server})
 	if err != nil {
 		return err
 	}

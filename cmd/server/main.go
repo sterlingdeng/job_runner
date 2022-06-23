@@ -52,7 +52,7 @@ func cmd() error {
 		grpc.ChainStreamInterceptor(authn.StreamServerInterceptor),
 	)
 	jobService := jobs.NewService(ctx)
-	jobsAPI := jobs.NewJobs(ctx, jobService)
+	jobsAPI := jobs.NewJobs(jobService)
 	proto.RegisterJobServiceServer(server, jobsAPI)
 
 	listener, err := net.Listen("tcp", port)
