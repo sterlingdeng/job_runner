@@ -3,9 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
-	"job_runner/pkg/cgroupz"
 	"os"
 	"os/exec"
+
+	"job_runner/pkg/cgroupz"
 )
 
 // this builds a program that runs as a parent process that eventually forks
