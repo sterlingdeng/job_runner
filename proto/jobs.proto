@@ -1,0 +1,44 @@
+syntax = "proto3";
+option go_package= "job_runner/proto";
+
+message Job {
+	int32 id = 1;
+	repeated string cmd = 2;
+	string status = 3;
+}
+
+message GetRequest {
+	int32 id = 1;
+}
+
+message StartRequest {
+	repeated string cmd = 1;
+	int32 cpu_weight = 2;
+	int32 max_mem_use = 3;
+	int64 max_disk_io = 4;
+}
+
+message StopRequest {
+	int32 id = 1;
+}
+
+message StopResponse {
+	int32 exit_code = 1;
+	string status = 2;
+}
+
+message StreamRequest {
+	int32 id = 1;
+}
+
+message StreamResponse {
+	bytes stream = 1;
+}
+
+service JobService {
+	rpc Get(GetRequest) returns (Job);
+	rpc Start(StartRequest) returns(Job);
+	rpc Stop(StopRequest) returns(StopResponse);
+	rpc Stream(StreamRequest) returns(stream StreamResponse);
+}
+
